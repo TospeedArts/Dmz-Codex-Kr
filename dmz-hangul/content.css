@@ -1,0 +1,5 @@
+/* 한글로 바뀐 요소: 영문용 자간·줄바꿈 설정이 한글을 어색하게 만들지 않도록 보정 */
+.dmzko-t {
+  letter-spacing: normal !important;
+  word-break: keep-all;
+}
