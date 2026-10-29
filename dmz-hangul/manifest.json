@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "DMZ Codex 한글 지도 (MW4 하진)",
-  "version": "1.7.6",
-  "description": "dmzcodex.com의 MW4 DMZ 하진 지도·위치·전리품·아이템 페이지를 한글로 바꿔 보여주고, 검색창에 한글로 검색할 수 있게 합니다.",
+  "version": "1.0",
+  "description": "dmzcodex.com의 MW4 DMZ 하진 지도·위치·전리품 페이지를 한글로 바꿔 보여주고, 검색창에 한글로 검색할 수 있으며, 지도 아이콘에 마우스를 올리면 한글 이름을 보여줍니다.",
   "permissions": [
     "storage"
   ],

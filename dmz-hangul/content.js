@@ -1,18 +1,18 @@
 /*
- * dmzcodex.com/map/ 및 /locations/ 한글화 콘텐츠 스크립트
+ * dmzcodex.com 한글화 콘텐츠 스크립트 (지도·위치·전리품 등)
  * - 텍스트 노드 + title / aria-label / alt / placeholder 속성을 번역
  * - 지도는 JS로 계속 다시 그려지므로 MutationObserver로 변경분만 처리
  */
 (function () {
   "use strict";
 
-  const DEFAULTS = { enabled: true, unofficial: true, collect: false, search: true };
+  const DEFAULTS = { enabled: true, hover: true, collect: false };
   const ATTRS = ["title", "aria-label", "alt", "placeholder"];
   const SKIP = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT", "CODE", "PRE"]);
 
   chrome.storage.sync.get(DEFAULTS, (opt) => {
     // 한글 검색 브리지(search-bridge.js)가 읽는 스위치
-    document.documentElement.dataset.dmzkoSearch = opt.enabled && opt.search ? "1" : "0";
+    document.documentElement.dataset.dmzkoSearch = opt.enabled ? "1" : "0";
     if (!opt.enabled) return;
     start(opt);
   });
@@ -24,7 +24,7 @@
 
   function start(opt) {
     const translate = DMZKO_API.createTranslator(DMZKO_DICT, {
-      unofficial: opt.unofficial,
+      unofficial: true, // 비공식 번역도 항상 적용
     });
 
     // 번역해서 노드에 쓴 마지막 값 (자기 자신이 일으킨 변경 무시용)
@@ -66,83 +66,87 @@
     }
 
 
-    // ── 위치 페이지 전체 수집 (팝업의 '모든 위치 페이지 수집') ──
-    // 같은 사이트의 /locations/ 하위 페이지를 직접 읽어 번역이 안 되는 문장을 모읍니다.
-    // 링크가 섞인 문장은 {1}, {2} 형태로 모입니다.
-    const LOC_SLUGS = ["14th-political-prison","admin-complex-no-2","air-base-bunker","air-base-exterior","chang-san-air-base","cheongun-outskirts","cheongun-village","cheonwang-peak-array","compound-alpha","compound-bravo","compound-charlie","compound-delta","compound-echo","compound-foxtrot","construction-zone","daesong-ridge","dbn-headquarters","deadtown","deadtown-exterior","donpyeong-gate","farmland-exterior","field-depot","fire-station-storage","hajin-river","hajin-river-heights","han-go-korean-bbq","haneul-nuclear-reactor","hanex-bank","hanrim-village","heavenly-luck-casino","imjin-farmland","imjin-suburb","jayon-warehouses","mirae-general-hospital","mujin-pass","namjin-riverside","nurigo-east","nurigo-mall","nurigo-west","oamsik-turtle-island","old-barber-shop","police-station-armory","prison","pyonghwa-village","re-education-center","reactor","revolution-dam","rice-mill","russian-border-crossing","russian-border-crossing-east","russian-border-crossing-west","shoreline-station","silo-control-room","songdo-pier","songdo-wharf","south-island","south-korean-border-zone","the-citadel","the-fortress-prison-yard","the-grid","theatre","tong-il-village","wolves-stadium","baseball-stadium-b-station","city-hall","expressway-no-1","ginyeom-il-bridge","hotel-lucera","jeong-loading-dock","jinseo-park-towers","la-grande-vie","minsok-art-school","nenshin-tech-complex","russian-border","year-of-the-fire-horse-statue"];
-
-    function extractMissing(doc) {
-      const found = [];
-      const els = doc.body ? doc.body.querySelectorAll("*") : [];
-      for (const el of els) {
-        if (SKIP.has(el.tagName.toUpperCase()) || el.closest("script,style,noscript,textarea,code,pre")) continue;
-        let tpl = "";
-        let n = 0;
-        let letters = false;
-        for (const c of el.childNodes) {
-          if (c.nodeType === 3) {
-            tpl += c.nodeValue;
-            if (/[A-Za-z]/.test(c.nodeValue)) letters = true;
-          } else if (c.nodeType === 1 && /\S/.test(c.textContent) && !SKIP.has(c.tagName.toUpperCase())) {
-            tpl += "{" + ++n + "}";
-          }
-        }
-        if (!letters) continue;
-        tpl = tpl.replace(/\s+/g, " ").trim();
-        if (tpl.length < 4 || tpl.length > 600 || !/[A-Za-z]{3,}/.test(tpl)) continue;
-        if (/^[A-J][0-9](\s|$)/.test(tpl) && tpl.length < 8) continue;
-        if (translate.exact(tpl) !== null) continue;
-        found.push(tpl);
-      }
-      return found;
-    }
-
-    let crawling = false;
-    async function crawlLocations() {
-      if (crawling) return;
-      crawling = true;
-      const urls = new Set(LOC_SLUGS.map((s) => location.origin + "/locations/" + s + "/"));
-      urls.add(location.origin + "/locations/");
-      document.querySelectorAll('a[href*="/locations/"]').forEach((a) => {
-        try {
-          const u = new URL(a.href, location.href);
-          if (u.origin === location.origin && /^\/locations\/[^/]+\/?$/.test(u.pathname)) urls.add(u.origin + u.pathname.replace(/\/?$/, "/"));
-        } catch (e) {}
-      });
-      const list = [...urls];
-      const result = new Set();
-      let ok = 0;
-      let fail = 0;
-      for (let i = 0; i < list.length; i++) {
-        try {
-          const res = await fetch(list[i], { credentials: "same-origin" });
-          if (!res.ok) throw new Error(res.status);
-          const doc = new DOMParser().parseFromString(await res.text(), "text/html");
-          for (const m of extractMissing(doc)) result.add(m);
-          ok++;
-        } catch (e) {
-          fail++;
-        }
-        chrome.storage.local.set({ crawlStatus: { done: i + 1, total: list.length, ok, fail, running: true } });
-        await new Promise((r) => setTimeout(r, 250));
-      }
-      chrome.storage.local.get({ missing: [] }, (r) => {
-        const all = new Set(r.missing);
-        for (const m of result) all.add(m);
-        chrome.storage.local.set({
-          missing: [...all].slice(-5000),
-          crawlStatus: { done: list.length, total: list.length, ok, fail, running: false, added: result.size },
-        });
-        crawling = false;
-      });
-    }
-
-    chrome.runtime.onMessage.addListener((msg, sender, reply) => {
-      if (msg && msg.type === "crawl-locations") {
-        crawlLocations();
-        reply({ started: true });
-      }
-    });
+    // [보류] 위치 페이지 전체 수집 — 나중에 다시 쓰려면 아래 줄 맨 앞의 '// ' 를 모두 지우세요.
+    // (popup.html 의 crawl 버튼, popup.js 의 [보류] 주석도 함께 푸세요.)
+    // // ── 위치 페이지 전체 수집 (팝업의 '모든 위치 페이지 수집') ──
+    // // 같은 사이트의 /locations/ 하위 페이지를 직접 읽어 번역이 안 되는 문장을 모읍니다.
+    // // 링크가 섞인 문장은 {1}, {2} 형태로 모입니다.
+    // const LOC_SLUGS = ["14th-political-prison","admin-complex-no-2","air-base-bunker","air-base-exterior","chang-san-air-base","cheongun-outskirts","cheongun-village","cheonwang-peak-array","compound-alpha","compound-bravo","compound-charlie","compound-delta","compound-echo","compound-foxtrot","construction-zone","daesong-ridge","dbn-headquarters","deadtown","deadtown-exterior","donpyeong-gate","farmland-exterior","field-depot","fire-station-storage","hajin-river","hajin-river-heights","han-go-korean-bbq","haneul-nuclear-reactor","hanex-bank","hanrim-village","heavenly-luck-casino","imjin-farmland","imjin-suburb","jayon-warehouses","mirae-general-hospital","mujin-pass","namjin-riverside","nurigo-east","nurigo-mall","nurigo-west","oamsik-turtle-island","old-barber-shop","police-station-armory","prison","pyonghwa-village","re-education-center","reactor","revolution-dam","rice-mill","russian-border-crossing","russian-border-crossing-east","russian-border-crossing-west","shoreline-station","silo-control-room","songdo-pier","songdo-wharf","south-island","south-korean-border-zone","the-citadel","the-fortress-prison-yard","the-grid","theatre","tong-il-village","wolves-stadium","baseball-stadium-b-station","city-hall","expressway-no-1","ginyeom-il-bridge","hotel-lucera","jeong-loading-dock","jinseo-park-towers","la-grande-vie","minsok-art-school","nenshin-tech-complex","russian-border","year-of-the-fire-horse-statue"];
+    //
+    // function extractMissing(doc) {
+    //   const found = [];
+    //   const els = doc.body ? doc.body.querySelectorAll("*") : [];
+    //   for (const el of els) {
+    //     if (SKIP.has(el.tagName.toUpperCase()) || el.closest("script,style,noscript,textarea,code,pre")) continue;
+    //     let tpl = "";
+    //     let n = 0;
+    //     let letters = false;
+    //     for (const c of el.childNodes) {
+    //       if (c.nodeType === 3) {
+    //         tpl += c.nodeValue;
+    //         if (/[A-Za-z]/.test(c.nodeValue)) letters = true;
+    //       } else if (c.nodeType === 1 && /\S/.test(c.textContent) && !SKIP.has(c.tagName.toUpperCase())) {
+    //         tpl += "{" + ++n + "}";
+    //       }
+    //     }
+    //     if (!letters) continue;
+    //     tpl = tpl.replace(/\s+/g, " ").trim();
+    //     if (tpl.length < 4 || tpl.length > 600 || !/[A-Za-z]{3,}/.test(tpl)) continue;
+    //     if (/^[A-J][0-9](\s|$)/.test(tpl) && tpl.length < 8) continue;
+    //     if (translate.exact(tpl) !== null) continue;
+    //     found.push(tpl);
+    //   }
+    //   return found;
+    // }
+    //
+    // let crawling = false;
+    // async function crawlLocations() {
+    //   if (crawling) return;
+    //   crawling = true;
+    //   const urls = new Set(LOC_SLUGS.map((s) => location.origin + "/locations/" + s + "/"));
+    //   urls.add(location.origin + "/locations/");
+    //   document.querySelectorAll('a[href*="/locations/"]').forEach((a) => {
+    //     try {
+    //       const u = new URL(a.href, location.href);
+    //       if (u.origin === location.origin && /^\/locations\/[^/]+\/?$/.test(u.pathname)) urls.add(u.origin + u.pathname.replace(/\/?$/, "/"));
+    //     } catch (e) {}
+    //   });
+    //   const list = [...urls];
+    //   const result = new Set();
+    //   let ok = 0;
+    //   let fail = 0;
+    //   for (let i = 0; i < list.length; i++) {
+    //     try {
+    //       const res = await fetch(list[i], { credentials: "same-origin" });
+    //       if (!res.ok) throw new Error(res.status);
+    //       const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+    //       for (const m of extractMissing(doc)) result.add(m);
+    //       ok++;
+    //     } catch (e) {
+    //       fail++;
+    //     }
+    //     chrome.storage.local.set({ crawlStatus: { done: i + 1, total: list.length, ok, fail, running: true } });
+    //     await new Promise((r) => setTimeout(r, 250));
+    //   }
+    //   chrome.storage.local.get({ missing: [] }, (r) => {
+    //     const all = new Set(r.missing);
+    //     for (const m of result) all.add(m);
+    //     chrome.storage.local.set({
+    //       missing: [...all].slice(-5000),
+    //       crawlStatus: { done: list.length, total: list.length, ok, fail, running: false, added: result.size },
+    //     });
+    //     crawling = false;
+    //   });
+    // }
+    //
+    // chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+    //   if (msg && msg.type === "crawl-locations") {
+    //     crawlLocations();
+    //     reply({ started: true });
+    //   }
+    // });
+    //
+    //
 
     function markParent(parent) {
       if (parent && parent.classList) parent.classList.add("dmzko-t");
@@ -277,6 +281,7 @@
     function doText(node) {
       const val = node.nodeValue;
       if (!val || lastText.get(node) === val) return;
+      if (node.parentElement && SKIP.has(node.parentElement.tagName.toUpperCase())) return;
       orig.set(node, val);
       if (node.parentElement) pending.add(node.parentElement);
       const out = translate(val);
@@ -363,6 +368,119 @@
       }
       queue();
     });
+
+    // ── 지도 아이콘 마우스 오버 이름 표시 (팝업의 '지도 아이콘 이름 표시') ──
+    // 사이트의 지도 아이콘은 images/services/<종류>--map-icon.(png|svg), images/location-icons/*.webp,
+    // images/operations/*--game-icon.png 이미지입니다. 아이콘에 마우스를 올리면 한글 이름을 말풍선으로 보여줍니다.
+    // 이름은 ① 아이콘의 aria-label/title/alt → ② 아이콘 옆에 붙은 글자(예: "주유소 · D2") → ③ 이미지 파일명(종류) 순으로 찾습니다.
+    function setupHover() {
+      const ICON = 'img[src*="--map-icon"], img[src*="/location-icons/"], img[src*="--game-icon"]';
+      const tip = document.createElement("code"); // CODE 태그: 번역 대상에서 제외됨
+      tip.setAttribute("aria-hidden", "true");
+      tip.style.cssText =
+        "position:fixed;left:0;top:0;z-index:2147483647;max-width:320px;padding:4px 8px;background:#0b0c0d;color:#fff;" +
+        "border:1px solid #fff;border-radius:4px;font:12px/1.4 system-ui,'Malgun Gothic',sans-serif;pointer-events:none;" +
+        "display:none;white-space:normal;word-break:keep-all;letter-spacing:normal";
+      document.body.appendChild(tip);
+
+      // el 안(또는 el 자신)에 아이콘 이미지가 '딱 하나'면 el 은 마커 하나
+      const iconOf = (el) => {
+        if (el.tagName === "IMG") return el.matches(ICON) ? el : null;
+        const imgs = el.querySelectorAll(ICON);
+        return imgs.length === 1 ? imgs[0] : null;
+      };
+      // 마우스가 실제로 마커 위에 있는지 (큰 레이어가 아이콘 하나만 품고 있는 경우 걸러냄)
+      const overMarker = (el, x, y) => {
+        const r = el.getBoundingClientRect();
+        return r.width <= 360 && r.height <= 160 && x >= r.left - 4 && x <= r.right + 4 && y >= r.top - 4 && y <= r.bottom + 4;
+      };
+      function findMarker(target, x, y) {
+        let el = target instanceof Element ? target : target && target.parentElement;
+        let best = null;
+        // 아이콘에서 위로 올라가며, 같은 아이콘 하나만 품은 가장 큰 '작은 상자'를 마커로 삼는다 (아이콘 + 옆 글자 + 링크 감싸개)
+        for (let i = 0; el && el !== document.body && i < 7; i++, el = el.parentElement) {
+          if (el.closest("li, nav, header, footer, code")) return null; // 왼쪽 목록·메뉴의 아이콘은 제외
+          const img = iconOf(el);
+          if (img && overMarker(el, x, y) && (!best || img === best.img)) best = { el, img };
+          else if (best) break;
+          else if (img) return null; // 아이콘은 있으나 너무 큰 레이어
+        }
+        return best;
+      }
+
+      const humanize = (src) => {
+        const m = /\/([a-z0-9-]+?)(?:--map-icon|--game-icon)?\.(?:png|svg|webp)(?:\?|$)/i.exec(src || "");
+        if (!m) return "";
+        return m[1].replace(/-/g, " ").replace(/\b[a-z]/g, (ch) => ch.toUpperCase());
+      };
+      function nameOf(m) {
+        for (let e = m.img, i = 0; e && i < 5; e = e.parentElement, i++) {
+          const t = (e.getAttribute("aria-label") || e.getAttribute("title") || (e.tagName === "IMG" ? e.getAttribute("alt") : "") || "").trim();
+          if (t) return t;
+          if (e === m.el) break;
+        }
+        const own = m.el.textContent.replace(/\s+/g, " ").trim();
+        if (own && own.length <= 80) return own;
+        return humanize(m.img.getAttribute("src"));
+      }
+
+      let cur = null;
+      // 마우스를 따라다니지 않고, 해당 아이콘(마커) 오른쪽에 붙여서 보여준다. 오른쪽에 자리가 없으면 왼쪽.
+      const place = () => {
+        if (!cur) return;
+        tip.style.left = "0px";
+        tip.style.top = "0px";
+        const r = cur.el.getBoundingClientRect();
+        const w = tip.offsetWidth;
+        const h = tip.offsetHeight;
+        let x = r.right + 6;
+        if (x + w > innerWidth - 4) x = Math.max(4, r.left - w - 6);
+        const y = Math.max(4, Math.min(r.top + (r.height - h) / 2, innerHeight - h - 4));
+        tip.style.left = Math.round(x) + "px";
+        tip.style.top = Math.round(y) + "px";
+      };
+      const hide = () => {
+        cur = null;
+        tip.style.display = "none";
+      };
+      function update(e) {
+        const m = findMarker(e.target, e.clientX, e.clientY);
+        if (!m) {
+          if (cur) hide();
+          return;
+        }
+        if (cur && cur.el === m.el) return;
+        const raw = nameOf(m);
+        if (!raw) return hide();
+        cur = m;
+        tip.textContent = translate(raw);
+        tip.style.display = "block";
+        place();
+      }
+
+      document.addEventListener("mouseover", update, true);
+      // 확대/축소·드래그로 숨겨진 뒤에도, 마우스가 아이콘 위에 있으면 다시 보여줌 (큰 영역 검사는 피하려고 아이콘 근처만)
+      document.addEventListener(
+        "mousemove",
+        (e) => {
+          if (cur) return;
+          const t = e.target;
+          if (t instanceof Element && (t.matches(ICON) || (t.children.length <= 3 && t.querySelector(ICON)))) update(e);
+        },
+        true
+      );
+      document.addEventListener(
+        "mouseout",
+        (e) => {
+          if (cur && !(e.relatedTarget && cur.el.contains(e.relatedTarget))) hide();
+        },
+        true
+      );
+      // 지도를 끌거나 확대/축소할 때는 말풍선을 숨김
+      for (const ev of ["mousedown", "wheel", "scroll", "touchstart"]) document.addEventListener(ev, hide, true);
+    }
+
+    if (opt.hover && document.body) setupHover();
 
     walk(document); // 최초 1회 전체 처리
     mo.observe(document.documentElement, {
